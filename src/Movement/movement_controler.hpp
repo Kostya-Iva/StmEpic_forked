@@ -61,7 +61,7 @@ public:
   MovementEquation();
 
   /// @brief  Destructor for the MovementEquation class
-  virtual ~MovementEquation(){};
+  virtual ~MovementEquation() {};
 
   /// @brief initiates the begining state of the controler
   /// @param current_position current position of the arm in radians when the controler is initiated

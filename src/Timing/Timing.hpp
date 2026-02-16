@@ -95,7 +95,7 @@ private:
  * This class provides functionalities for handling time-based operations.
  * It can be used to create timers that can be trigered after specified period of time.
  * usefull for operation that check if something was done in a specific time period.
- * Or for creatign simple task for whitch runing separate thread would be an overkill.
+ * Or for creatign task for whitch runing separate thread would be an overkill.
  * In task scenario Timing should be used with TimeScheduler.
  */
 
