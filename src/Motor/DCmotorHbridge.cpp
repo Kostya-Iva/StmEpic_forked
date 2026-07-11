@@ -63,8 +63,10 @@ void DCMotorHBridge::set_velocity(float velocity) {
 
 void DCMotorHBridge::set_torque(float torque) {
 
-  if(std::abs(torque) > this->max_velocity) {
-    torque = sgn(torque) * this->max_velocity;
+	const float max_torque = 1.0f; //Nie znana wartość momentu silników
+
+  if(std::abs(torque) > this->max_torque) {
+    torque = sgn(torque) * this->max_torque;
   }
 
   current_torque_cmd = torque;
@@ -80,7 +82,7 @@ void DCMotorHBridge::set_torque(float torque) {
   if(this->max_velocity <= 0.0f)
     return;
 
-  float duty = torque / this->max_velocity;
+  float duty = torque / this->max_torque;
 
   uint32_t period = __HAL_TIM_GET_AUTORELOAD(&htim);
   uint32_t pulse  = (uint32_t)(duty * (float)period);
