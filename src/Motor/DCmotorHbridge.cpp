@@ -11,82 +11,100 @@ template <typename T> int sgn(T val) {
   return (T(0) < val) - (val < T(0));
 }
 
-DCMotorHBridge::DCMotorHBridge(TIM_HandleTypeDef &_htim, uint32_t _timer_channel, GpioPin &_direction_pin)
-: htim(_htim), timer_channel(_timer_channel), direction_pin(_direction_pin) {
-  this->max_velocity = 1.0f;
-  this->min_velocity = 0.0f;
-  this->gear_ratio   = 1.0f;
-  this->reverse      = false;
-  this->is_enabled   = false;
+DCMotorHBridge::DCMotorHBridge(TIM_HandleTypeDef &_htim, uint32_t _timer_channel, GpioPin &_direction_pin):
+htim(_htim), timer_channel(_timer_channel), direction_pin(_direction_pin), gear_ratio(1.0f), reverse(false), is_enabled(false){
+  
+  DCMotorPWMSettings default_DC_settings;
+  default_DC_settings.max_velocity_setting = 100.0f; // zależne od silnika
+  default_DC_settings.min_velocity_setting = 0.0f; // zależne od silnika
+  default_DC_settings.max_torque_setting = 20.0f; // zależne od silnika
+  default_DC_settings.min_torque_setting = 0.0f; // zależne od silnika
+  
+  default_DC_settings.min_pulse_width_us = 0.0f;
+  default_DC_settings.max_pulse_width_us = 2500.0f;
+  default_DC_settings.pwm_frequency = 1000.0f;
+  (void)device_set_settings(default_DC_settings);
+}
 
-  this->current_position_cmd = 0.0f;
-  this->current_velocity_cmd = 0.0f;
-  this->current_torque_cmd   = 0.0f;
+Status DCMotorHBridge::device_set_settings(const DeviceSettings &_settings) {
+  const auto *dc_settings = dynamic_cast<const DCMotorPWMSettings *>(&_settings);
+  if (!dc_settings) return Status::TypeError("Invalid settings type");
+
+  settings = *dc_settings;
+  return Status::OK();
 }
 
 void DCMotorHBridge::set_velocity(float velocity) {
+	if (!is_enabled) return;
+	  
+	  //jeżeli jest przekładnia
+	  velocity *= gear_ratio;
+	  
+	  //sprawdzenie przekroczenia założonej prędkości
+	  if(std::abs(velocity) > settings.max_velocity_setting)
+		velocity = sgn(velocity) * settings.max_velocity_setting;
+	  else if(std::abs(velocity) < settings.min_velocity_setting) {
+		__HAL_TIM_SET_COMPARE(&htim, static_cast<uint32_t>(timer_channel), 0);
+		current_velocity_cmd = 0.0f;
+		return;
+	  }
+	
+	  //ustawienie prędkości
+	  current_velocity_cmd = velocity;
+	  bool direction = !reverse;
+	  
+	  //ustawienie kierunku
+	  if(velocity > 0)
+		direction_pin.write(direction);
+	  else {
+		direction_pin.write(!direction);
+		velocity = -velocity;
+	  }
 
+	  if(velocity == 0) {
+		__HAL_TIM_SET_COMPARE(&htim, static_cast<uint32_t>(timer_channel), 0);
+		return;
+	  }
 
-  if(std::abs(velocity) > this->max_velocity)
-    velocity = sgn(velocity) * this->max_velocity;
-  else if(std::abs(velocity) < this->min_velocity) {
-    __HAL_TIM_SET_COMPARE(&htim, static_cast<uint32_t>(timer_channel), 0);
-    current_velocity_cmd = 0.0f;
-    return;
-  }
+	  // wyliczenie PWM
+	  float duty_velocity = velocity / settings.max_velocity_setting;
+	  if(duty_velocity > 1.0f)
+		duty_velocity = 1.0f;
 
-  current_velocity_cmd = velocity;
-
-  bool direction = !reverse;
-  if(velocity > 0)
-    direction_pin.write(direction);
-  else {
-    direction_pin.write(!direction);
-    velocity = -velocity;
-  }
-
-  if(velocity == 0) {
-    __HAL_TIM_SET_COMPARE(&htim, static_cast<uint32_t>(timer_channel), 0);
-    return;
-  }
-
-  // calculate % of duty cycle
-  float duty = velocity / this->max_velocity;
-  if(duty > 1.0f)
-    duty = 1.0f;
-
-  // sets defined duty cycle
-  uint32_t period = __HAL_TIM_GET_AUTORELOAD(&htim);
-  uint32_t pulse  = (uint32_t)(duty * (float)period);
-  __HAL_TIM_SET_COMPARE(&htim, static_cast<uint32_t>(timer_channel), pulse);
+	  // ustawia PWM
+	  uint32_t period = __HAL_TIM_GET_AUTORELOAD(&htim);
+	  uint32_t pulse  = (uint32_t)(duty_velocity * (float)period);
+	  __HAL_TIM_SET_COMPARE(&htim, static_cast<uint32_t>(timer_channel), pulse);
 }
 
 void DCMotorHBridge::set_torque(float torque) {
 
-	const float max_torque = 1.0f; //Nie znana wartość momentu silników
+	if (!is_enabled) return;
+	
+	  torque *= gear_ratio;
+	
+	  if(std::abs(torque) > settings.max_torque_setting) {
+		torque = sgn(torque) * settings.max_torque_setting;
+	  }
 
-  if(std::abs(torque) > this->max_torque) {
-    torque = sgn(torque) * this->max_torque;
-  }
+	  current_torque_cmd = torque;
 
-  current_torque_cmd = torque;
+	  bool direction = !reverse;
+	  if(torque > 0) {
+		direction_pin.write(direction);
+	  } else {
+		direction_pin.write(!direction);
+		torque = -torque;
+	  }
 
-  bool direction = !reverse;
-  if(torque > 0) {
-    direction_pin.write(direction);
-  } else {
-    direction_pin.write(!direction);
-    torque = -torque;
-  }
+	  if(settings.max_torque_setting <= 0.0f)
+		return;
 
-  if(this->max_velocity <= 0.0f)
-    return;
+	  float duty_torque = torque / settings.max_torque_setting;
 
-  float duty = torque / this->max_torque;
-
-  uint32_t period = __HAL_TIM_GET_AUTORELOAD(&htim);
-  uint32_t pulse  = (uint32_t)(duty * (float)period);
-  __HAL_TIM_SET_COMPARE(&htim, static_cast<uint32_t>(timer_channel), pulse);
+	  uint32_t period = __HAL_TIM_GET_AUTORELOAD(&htim);
+	  uint32_t pulse  = (uint32_t)(duty_torque * (float)period);
+	  __HAL_TIM_SET_COMPARE(&htim, static_cast<uint32_t>(timer_channel), pulse);
 }
 
 // not implemented
@@ -121,10 +139,10 @@ void DCMotorHBridge::set_gear_ratio(float gear_ratio) {
   this->gear_ratio = gear_ratio;
 }
 void DCMotorHBridge::set_max_velocity(float max_velocity) {
-  this->max_velocity = max_velocity;
+  settings.max_velocity_setting = max_velocity;
 }
 void DCMotorHBridge::set_min_velocity(float min_velocity) {
-  this->min_velocity = min_velocity;
+  settings.min_velocity_setting = min_velocity;
 }
 void DCMotorHBridge::set_reverse(bool reverse) {
   this->reverse = reverse;
@@ -152,9 +170,5 @@ Status DCMotorHBridge::device_stop() {
   __HAL_TIM_SET_COMPARE(&htim, static_cast<uint32_t>(timer_channel), 0);
   HAL_TIM_PWM_Stop(&htim, timer_channel);
   is_enabled = false;
-  return Status::OK();
-}
-Status DCMotorHBridge::device_set_settings(const DeviceSettings &settings) {
-  (void)settings;
   return Status::OK();
 }
