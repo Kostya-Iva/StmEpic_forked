@@ -5,11 +5,28 @@
 #include "stmepic.hpp"
 
 namespace stmepic::motor {
+
+struct DCMotorPWMSettings : public DeviceSettings {
+  float max_velocity_setting; 
+  float min_velocity_setting;
+  float max_torque_setting; 
+  float min_torque_setting; 
+
+  float current_velocity_setting;
+  float current_torque_setting;
+
+  float min_pulse_width_us; // Minimum pulse width in micro seconds [us]
+  float max_pulse_width_us; // Maximum pulse width in micro seconds [us]
+  float pwm_frequency;      // Frequency of the PWM signal in Hz [Hz]
+};
+
 class DCMotorHBridge : public MotorBase {
+
 public:
   DCMotorHBridge(TIM_HandleTypeDef &htim, uint32_t timer_channel, GpioPin &direction_pin);
 
   void set_position(float position) override;
+  
   void set_velocity(float velocity) override;
   void set_torque(float torque) override;
 
@@ -49,6 +66,7 @@ private:
   float current_position_cmd;
   float current_velocity_cmd;
   float current_torque_cmd;
+  DCMotorPWMSettings settings;
 };
 
 }
